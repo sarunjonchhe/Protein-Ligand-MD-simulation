@@ -1,0 +1,100 @@
+#!/bin/bash
+
+#Automation of preprocessing of protein-ligand complex for Molecular Dynamics Simulation
+
+for (( i=1; i<=10; i++ ))
+do
+#for docking
+vina --receptor target$i.pdbqt --ligand ligand$i.pdbqt --config config.txt --log log.txt
+mv log.txt log$i.txt
+mv output.pdbqt output$i.pdbqt
+vina_split --input output$i.pdbqt
+# for preporcessing for protein ligand simulation-- if the cordinate file consists of both protein and ligand--save them as different
+grep UNK $i.pdb > unk$i.pdb
+
+#Add hydrogen and save in mol2 format
+#Replace to UNK 
+sed -i 's/UNK0/UNK/g' unk$i.mol2    # replace UNK0 with  UNK
+sed -i 's/LIG1/UNK/g' unk$i.mol2
+sed -i 's/LIG2/UNK/g' unk$i.mol2
+sed -i 's/LIG4/UNK/g' unk$i.mol2
+sed -i '2s/.*/UNK/g' unk$i.mol2
+sed -i 's/HOH0/UNK/g' unk$i.mol2
+
+#Perl to make the cgenff format (#mdtutorials)
+#perl sort_mol2_bonds.pl unk$i.mol2 unk_fix$i.mol2
+
+#Remove the unwanted files:
+rm unk_ini$i.pdb
+rm unk$i.itp
+rm unk$i.prm
+
+#Generate the required files(#mdtutorials)
+#python cgenff_charmm2gmx_py2.py UNK unk_fix$i.mol2 unk$i.str charmm36-mar2019.ff
+
+#Assign the respective filenames
+mv unk_ini.pdb unk_ini$i.pdb
+mv unk.itp unk$i.itp
+mv unk.prm unk$i.prm
+mv unk.top unk$i.top
+
+#Assign topol file for each 
+cp topol.top topol$i.top
+
+#Changes in topol
+sed -i "22 i ; Include ligand parameters" topol$i.top
+sed -i '23 i #include "unkp.prm"' topol$i.top
+sed -i "s/unkp/unk$i/g" topol$i.top
+sed -i "44195 i ; Include ligand topology" topol$i.top
+sed -i '44196 i #include "unki.itp"' topol$i.top
+sed -i "s/unki/unk$i/g" topol$i.top
+
+#convert unk_ini to gro format
+gmx editconf -f unk_ini$i.pdb -o unk$i.gro
+
+#cat p.gro unk$i.gro > complex$i.gro
+
+a = tr ' ' '\n' < unk3.gro | grep -c UNK
+a < unk3.gro | grep -c UNK
+a = grep -c "UNK" unk3.gro 
+
+# backup the protein file
+cp p.gro p$i.gro 
+grep UNK unk$i.gro > l$i.gro
+
+a="$(grep -c UNK l$i.gro)"		# a stores the number of UNK atoms
+echo $a
+b=$(($a + 4682))     			# b number of total atoms
+echo $b
+sed -i "s/4682/$b/g" p$i.gro
+sed -i "2s/.*/ $b/" p$i.gro
+sed -i "/4682/c\ $b" p$i.gro
+cat p$i.gro l$i.gro f.gro > complex$i.gro
+cat c$i.gro l.gro > complex.gro
+
+
+#Save the number of unk to the variable 'a'
+a="$(grep -c UNK l$i.gro)" 
+echo $a
+
+
+#rough
+a="$(grep -c UNK l3.gro)"
+echo $a
+b=$(($a+12))
+echo $b
+sed -i "/4682/c\$b" complex$i.gro
+#mv topol1.top topol4.top
+
+gmx editconf -f complex$i.gro -o newbox$i.gro -bt dodecahedron -d 1.0
+
+gmx solvate -cp newbox$i.gro -cs spc216.gro -p topol$i.top -o solv$i.gro
+
+gmx grompp -f ions.mdp -c solv$i.gro -p topol$i.top -o ions$i.tpr -maxwarn 1
+
+#gmx genion -s ions.tpr -o solv_ions.gro -p topol.top -pname NA -nname CL -neutral
+
+#gmx grompp -f em.mdp -c solv_ions.gro -p topol.top -o em.tpr
+#gmx mdrun -v -deffnm em
+
+done
