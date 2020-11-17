@@ -96,5 +96,53 @@ gmx grompp -f ions.mdp -c solv$i.gro -p topol$i.top -o ions$i.tpr -maxwarn 1
 
 #gmx grompp -f em.mdp -c solv_ions.gro -p topol.top -o em.tpr
 #gmx mdrun -v -deffnm em
+done
+
+for (( i=1; i<=10; i++ ))
+do
+#sed -i "22 i ; Include ligand parameters" topol$i.top
+#sed -i '23 i #include "unkp.prm"' topol$i.top
+#sed -i "s/unkp/unk$i/g" topol$i.top
+sed -i '23s/.*/#include "unkp.prm"/' topol$i.top
+sed -i "s/unkp/unk$i/g" topol$i.top
+#sed -i "44195 i ; Include ligand topology" topol$i.top
+#sed -i '44196 i #include "unki.itp"' topol$i.top
+#sed -i "s/unki/unk$i/g" topol$i.top
+sed -i '44196s/.*/#include "unki.itp"/' topol$i.top
+sed -i "s/unki/unk$i/g" topol$i.top
+
+
+sed -i "44197 i ; Ligand position restraints" topol$i.top
+sed -i '44198 i #ifdef POSRES' topol$i.top
+sed -i '44199 i #include "posre_unkk.itp"' topol$i.top
+sed -i "s/posre_unkk/posre_unk$i/g" topol$i.top
+sed -i "44200 i #endif" topol$i.top
 
 done
+
+#!/bin/bash
+#SBATCH -J ___________# Job name
+#SBATCH -p ____________# Partition
+#SBATCH -o job.%j.out     # Name of stdout output file (%j expands to jobId)
+#SBATCH -N 1                  # Total number of nodes requested
+#SBATCH -n 4                 # Total number of mpi tasks requested
+#SBATCH -t 72:00:00           # Run time (hh:mm:ss) - 1.5 hours
+
+
+# Launch MPI-based executable
+module load cuda/10.2
+module load gromacs/2018.8-gpu ##Load accordingly
+
+# loop for simulation of 17 complexes:
+for (( i=101; i<=119; i++ ))
+do
+gmx grompp -f $i/nvt$i.mdp -c $i/em$i.gro -r $i/em$i.gro -p $i/topol$i.top -n $i/index$i.ndx -o $i/nvt$i.tpr -maxwarn 10
+gmx mdrun -v -deffnm $i/nvt$i
+
+gmx grompp -f $i/npt.mdp -c $i/nvt$i.gro -t $i/nvt$i.cpt -r $i/nvt$i.gro -p $i/topol$i.top -n $i/index$i.ndx -o $i/npt$i.tpr -maxwarn 10
+gmx mdrun -v -deffnm $i/npt$i
+
+gmx grompp -f $i/md.mdp -c $i/npt$i.gro -t $i/npt$i.cpt -p $i/topol$i.top -n $i/index$i.ndx -o $i/md$i.tpr -maxwarn 10
+gmx mdrun -v -deffnm $i/md$i
+done
+
