@@ -1,0 +1,157 @@
+#Sarun Jonchhe 
+#Slurm Script for MD simulation in 1 go.
+
+#!/bin/bash
+  
+#SBATCH -p gpu
+#SBATCH -N 1
+#SBATCH -c 8
+#SBATCH --mem 30G
+#SBATCH -t 48:00:00
+#SBATCH --mail-type=all
+#SBATCH --mail-user=sjzmd@umsystem.edu
+#SBATCH --gres gpu:1
+
+module load gromacs/2022.5_gcc_9.5.0_openmpi_4.1.5_cuda   #load module of gromacs
+
+
+# for preporcessing for protein ligand simulation-- if the cordinate file consists of both protein and ligand--save them as different
+grep UNK $i.pdb > unk$i.pdb
+
+#Add hydrogen and save in mol2 format
+#Replace to UNK 
+sed -i 's/UNK0/UNK/g' unk$i.mol2    # replace UNK0 with  UNK
+sed -i 's/LIG1/UNK/g' unk$i.mol2
+sed -i 's/LIG2/UNK/g' unk$i.mol2
+sed -i 's/LIG4/UNK/g' unk$i.mol2
+sed -i '2s/.*/UNK/g' unk$i.mol2
+sed -i 's/HOH0/UNK/g' unk$i.mol2
+
+#Perl to make the cgenff format (#mdtutorials)
+#perl sort_mol2_bonds.pl unk$i.mol2 unk_fix$i.mol2
+
+#Remove the unwanted files:
+rm unk_ini$i.pdb
+rm unk$i.itp
+rm unk$i.prm
+
+#Generate the required files(#mdtutorials)
+#python cgenff_charmm2gmx_py2.py UNK unk_fix$i.mol2 unk$i.str charmm36-mar2019.ff
+
+#Assign the respective filenames
+mv unk_ini.pdb unk_ini$i.pdb
+mv unk.itp unk$i.itp
+mv unk.prm unk$i.prm
+mv unk.top unk$i.top
+
+#Assign topol file for each 
+cp topol.top topol$i.top
+
+#Changes in topol
+sed -i "22 i ; Include ligand parameters" topol$i.top
+sed -i '23 i #include "unkp.prm"' topol$i.top
+sed -i "s/unkp/unk$i/g" topol$i.top
+sed -i "44195 i ; Include ligand topology" topol$i.top
+sed -i '44196 i #include "unki.itp"' topol$i.top
+sed -i "s/unki/unk$i/g" topol$i.top
+
+#convert unk_ini to gro format
+gmx editconf -f unk_ini$i.pdb -o unk$i.gro
+
+#cat p.gro unk$i.gro > complex$i.gro
+
+a = tr ' ' '\n' < unk3.gro | grep -c UNK
+a < unk3.gro | grep -c UNK
+a = grep -c "UNK" unk3.gro 
+
+# backup the protein file
+cp p.gro p$i.gro 
+grep UNK unk$i.gro > l$i.gro
+
+a="$(grep -c UNK l$i.gro)"		# a stores the number of UNK atoms
+echo $a
+b=$(($a + 4682))     			# b number of total atoms
+echo $b
+sed -i "s/4682/$b/g" p$i.gro
+sed -i "2s/.*/ $b/" p$i.gro
+sed -i "/4682/c\ $b" p$i.gro
+cat p$i.gro l$i.gro f.gro > complex$i.gro
+cat c$i.gro l.gro > complex.gro
+
+
+#Save the number of unk to the variable 'a'
+a="$(grep -c UNK l$i.gro)" 
+echo $a
+
+
+#rough
+a="$(grep -c UNK l3.gro)"
+echo $a
+b=$(($a+12))
+echo $b
+sed -i "/4682/c\$b" complex$i.gro
+#mv topol1.top topol4.top
+
+gmx editconf -f complex$i.gro -o newbox$i.gro -bt dodecahedron -d 1.0
+
+gmx solvate -cp newbox$i.gro -cs spc216.gro -p topol$i.top -o solv$i.gro
+
+gmx grompp -f ions.mdp -c solv$i.gro -p topol$i.top -o ions$i.tpr -maxwarn 1
+
+#gmx genion -s ions.tpr -o solv_ions.gro -p topol.top -pname NA -nname CL -neutral
+
+#gmx grompp -f em.mdp -c solv_ions.gro -p topol.top -o em.tpr
+#gmx mdrun -v -deffnm em
+done
+
+for (( i=1; i<=10; i++ ))
+do
+#sed -i "22 i ; Include ligand parameters" topol$i.top
+#sed -i '23 i #include "unkp.prm"' topol$i.top
+#sed -i "s/unkp/unk$i/g" topol$i.top
+sed -i '23s/.*/#include "unkp.prm"/' topol$i.top
+sed -i "s/unkp/unk$i/g" topol$i.top
+#sed -i "44195 i ; Include ligand topology" topol$i.top
+#sed -i '44196 i #include "unki.itp"' topol$i.top
+#sed -i "s/unki/unk$i/g" topol$i.top
+sed -i '44196s/.*/#include "unki.itp"/' topol$i.top
+sed -i "s/unki/unk$i/g" topol$i.top
+
+
+sed -i "44197 i ; Ligand position restraints" topol$i.top
+sed -i '44198 i #ifdef POSRES' topol$i.top
+sed -i '44199 i #include "posre_unkk.itp"' topol$i.top
+sed -i "s/posre_unkk/posre_unk$i/g" topol$i.top
+sed -i "44200 i #endif" topol$i.top
+
+done
+
+# loop for simulation of 17 complexes:
+for (( i=101; i<=119; i++ ))
+do
+
+orterun gmx_mpi genion -s ions.tpr -o 1mwt_solv_ions.gro -p topol.top -pname NA -nname CL -neutral
+orterun gmx_mpi grompp -f minim.mdp -c 4cpk_solv_ions.gro -p topol.top -o em.tpr -maxwarn 1
+orterun gmx_mpi mdrun -v -deffnm em
+orterun gmx_mpi grompp -f nvt.mdp -c em.gro -r em.gro -p topol.top -n index.ndx -o nvt.tpr -maxwarn 3
+orterun gmx_mpi mdrun -deffnm nvt
+orterun gmx_mpi grompp -f npt.mdp -c nvt.gro -r nvt.gro -t nvt.cpt -p topol.top -n index.ndx -o npt.tpr -maxwarn 3
+orterun gmx_mpi mdrun -deffnm npt
+orterun gmx_mpi grompp -f md.mdp -c npt.gro -t npt.cpt -p topol.top -n index.ndx -o md_0_1.tpr -maxwarn 3
+orterun gmx_mpi mdrun -deffnm md_0_1
+
+
+done
+#Analysis
+#gmx_mpi trjconv -s md_0_1.tpr -f md1_noPBC.xtc -o md61.xtc -b 0 -e 6000gmx_mpi trjconv -s md_0_1.tpr -f md1_noPBC.xtc -o md61.xtc -b 0 -e 6000
+#rmsd calculation
+echo 4 4 | orterun gmx_mpi rms -s md_0_1.tpr -f md61.xtc -o rmsd61.xvg -tu ns
+#Rg calculation
+echo 1 | orterun gmx_mpi gyrate -s md_0_1.tpr -f md61.xtc -o rg61.xvg
+#rmsf calculation
+echo 4 | orterun gmx_mpi rmsf -f md61.xtc -s md_0_1.tpr -o rmsf61.xvg
+#SASA calculation
+echo 1 | orterun gmx_mpi sasa -s md_0_1.tpr -f md61.xtc -tu ns -o sasa61.xvg
+#Hbond trajectories
+echo 1 1 | orterun gmx_mpi hbond -f md61.xtc -s md_0_1.tpr -num hbond61.xvg
+
